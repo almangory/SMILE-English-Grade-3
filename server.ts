@@ -51,8 +51,30 @@ app.post("/api/tts", async (req, res) => {
     return res.json({ audio: audioCache[cacheKey] });
   }
 
+  // Define a stable, zero-dependency server-side helper to fetch Google Translate TTS
+  const fetchTranslateTTS = async (phrase: string): Promise<string> => {
+    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=en&client=tw-ob&q=${encodeURIComponent(phrase)}`;
+    const googleRes = await fetch(ttsUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
+      }
+    });
+    if (!googleRes.ok) {
+      throw new Error(`Google Translate TTS status error: ${googleRes.status}`);
+    }
+    const buffer = await googleRes.arrayBuffer();
+    return Buffer.from(buffer).toString("base64");
+  };
+
   if (!ai) {
-    // If Gemini client isn't available, notify frontend to use web speech synthesis fallback or return info
+    // If Gemini client isn't available, automatically fallback to Google Translate TTS which is 100% reliable and doesn't require keys
+    try {
+      const base64Audio = await fetchTranslateTTS(cleanText);
+      audioCache[cacheKey] = base64Audio;
+      return res.json({ audio: base64Audio });
+    } catch (e: any) {
+      console.error("Translate TTS direct generation error:", e.message || e);
+    }
     return res.json({ fallback: true, message: "Gemini API key not configured. Using Web Speech API." });
   }
 
@@ -81,7 +103,14 @@ app.post("/api/tts", async (req, res) => {
       throw new Error("No audio content returned from Gemini Live TTS");
     }
   } catch (error: any) {
-    console.error("Gemini TTS Error:", error.message || error);
+    console.error("Gemini TTS Error, switching back to elegant translate TTS:", error.message || error);
+    try {
+      const base64Audio = await fetchTranslateTTS(cleanText);
+      audioCache[cacheKey] = base64Audio;
+      return res.json({ audio: base64Audio });
+    } catch (e: any) {
+      console.error("Translate TTS secondary generation error:", e.message || e);
+    }
     return res.json({ fallback: true, error: error.message || "Failed to generate audio via Gemini" });
   }
 });

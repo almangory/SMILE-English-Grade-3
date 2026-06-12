@@ -31,6 +31,9 @@ export default function App() {
   const [selectedLesson, setSelectedLesson] = useState<Lesson>(SMILE_UNITS[0].lessons[0]);
   const [activeTab, setActiveTab] = useState<"book" | "dictionary" | "quiz" | "adventure">("book");
   
+  // Voice selection mode (Vibrant server-side AI Voice with zero-config HTML5 audio fallbacks)
+  const [voiceMode, setVoiceMode] = useState<"system" | "gemini">("gemini");
+
   // Game states
   const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
@@ -43,6 +46,19 @@ export default function App() {
   const [speakingText, setSpeakingText] = useState<string | null>(null);
   const [audioPlaybackActive, setAudioPlaybackActive] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Warm up system voices queue
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+      // Bind event for asynchronously loaded voices
+      if (window.speechSynthesis.onvoiceschanged !== undefined) {
+        window.speechSynthesis.onvoiceschanged = () => {
+          window.speechSynthesis.getVoices();
+        };
+      }
+    }
+  }, []);
 
   // Chat/Adventure state
   const [chatCharacter, setCharacter] = useState<string>("Ahmed");
@@ -86,6 +102,7 @@ export default function App() {
 
   // Text-To-Speech function using full-stack API or speech synthesis fallback
   const speakText = async (text: string, voiceName: string = "Kore") => {
+    // If the exact same text is playing, toggle pause
     if (speakingText === text && audioPlaybackActive) {
       if (audioRef.current) {
         audioRef.current.pause();
@@ -96,8 +113,21 @@ export default function App() {
       return;
     }
 
+    // Cancel any previous audio immediately (prevents overlapping/stuck sounds)
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    window.speechSynthesis.cancel();
+
     setSpeakingText(text);
     setAudioPlaybackActive(true);
+
+    // If System Voice mode is selected, speak synchronously to guarantee user-gesture context is kept intact
+    if (voiceMode === "system") {
+      fallbackSpeechSynthesis(text);
+      return;
+    }
 
     try {
       const response = await fetch("/api/tts", {
@@ -110,12 +140,13 @@ export default function App() {
       if (data.audio) {
         // Play base64 audio
         const audioUrl = `data:audio/mp3;base64,${data.audio}`;
-        if (audioRef.current) {
-          audioRef.current.pause();
-        }
         const audio = new Audio(audioUrl);
         audioRef.current = audio;
         audio.onended = () => {
+          setAudioPlaybackActive(false);
+          setSpeakingText(null);
+        };
+        audio.onerror = () => {
           setAudioPlaybackActive(false);
           setSpeakingText(null);
         };
@@ -133,9 +164,26 @@ export default function App() {
   const fallbackSpeechSynthesis = (text: string) => {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
+    
+    // Choose high quality English voices to avoid reading English text with Arabic or System voices
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      const voices = window.speechSynthesis.getVoices();
+      const englishVoice = voices.find(v => v.lang.startsWith("en-") && v.name.includes("Google")) 
+        || voices.find(v => v.lang.startsWith("en-") && (v.name.includes("Microsoft") || v.name.includes("Natural")))
+        || voices.find(v => v.lang.startsWith("en-")) 
+        || voices[0];
+      if (englishVoice) {
+        utterance.voice = englishVoice;
+      }
+    }
+
     utterance.lang = "en-US";
     utterance.rate = 0.85; // Speak moderately slow for children
     utterance.onend = () => {
+      setAudioPlaybackActive(false);
+      setSpeakingText(null);
+    };
+    utterance.onerror = () => {
       setAudioPlaybackActive(false);
       setSpeakingText(null);
     };
@@ -270,6 +318,62 @@ export default function App() {
                 );
               })}
             </div>
+          </div>
+
+          {/* Sound & Pronunciation Settings Widget */}
+          <div className="bg-white rounded-[32px] p-5 shadow-sm border-b-8 border-r-8 border-indigo-100 flex flex-col gap-3">
+            <h3 className="text-xs font-black text-indigo-900 uppercase tracking-widest flex items-center gap-1.5 border-b border-slate-100 pb-2">
+              <Volume2 className="w-4 h-4 text-indigo-500" />
+              Sound Settings • إعدادات الصوت
+            </h3>
+            
+            <p className="text-[11px] font-extrabold text-slate-500 leading-snug">
+              إذا واجهت أي مشكلة في نطق الكلمات، اختر نوع الصوت المناسب واضغط على زر التفعيل لتنشيط الصوت:
+            </p>
+
+            <div className="flex flex-col gap-2 mt-1">
+              <button
+                onClick={() => setVoiceMode("system")}
+                className={`w-full text-left p-3 rounded-[16px] border-b-4 transition-all flex items-center justify-between cursor-pointer ${
+                  voiceMode === "system"
+                    ? "bg-indigo-600 border-indigo-800 text-white font-black"
+                    : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 font-bold"
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="text-md">⚡</span>
+                  <div className="flex flex-col">
+                    <span className="text-[12px] leading-tight">System Voice (Instant)</span>
+                    <span className="text-[10px] opacity-80 leading-tight">صوت الجهاز (فوري ومضمون)</span>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => setVoiceMode("gemini")}
+                className={`w-full text-left p-3 rounded-[16px] border-b-4 transition-all flex items-center justify-between cursor-pointer ${
+                  voiceMode === "gemini"
+                    ? "bg-indigo-600 border-indigo-800 text-white font-black"
+                    : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 font-bold"
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="text-md">✨</span>
+                  <div className="flex flex-col">
+                    <span className="text-[12px] leading-tight">AI Voice (Premium)</span>
+                    <span className="text-[10px] opacity-80 leading-tight">صوت الذكاء الاصطناعي بدقة</span>
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            <button
+              onClick={() => speakText("Welcome to SMILE English Grade 3 pupil! As-salamu alaykum!", "Kore")}
+              className="mt-1 w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs uppercase py-3 px-4 rounded-[16px] border-b-4 border-emerald-700 transition-all flex items-center justify-center gap-2 cursor-pointer transform active:translate-y-0.5"
+            >
+              <Volume2 className="w-4 h-4" />
+              <span>Test & Unlock • تجربة وتفعيل الصوت</span>
+            </button>
           </div>
 
           {/* Award achievements section */}
@@ -433,30 +537,38 @@ export default function App() {
                       <div className="flex flex-col gap-4 max-w-xl mx-auto w-full mt-2">
                         {selectedLesson.content.dialogue.map((line, key) => {
                           const isSpecial = line.speaker === "Mrs. Hind" || line.speaker === "Mrs Hind" || line.speaker === "Teacher" || line.speaker === "Policeman";
+                          const isPlaying = speakingText === line.text && audioPlaybackActive;
                           return (
                             <div 
                               key={key} 
                               className={`flex items-start gap-3 w-full ${isSpecial ? "flex-row-reverse" : ""}`}
                             >
-                              <div className={`p-3 rounded-[20px] text-3xl font-black shadow-sm ${isSpecial ? "bg-amber-100 text-amber-700 border-2 border-amber-300" : "bg-sky-100 text-sky-700 border-2 border-sky-300"}`}>
+                              <div className={`p-3 rounded-[20px] text-3xl font-black shadow-sm select-none ${isSpecial ? "bg-amber-100 text-amber-700 border-2 border-amber-300" : "bg-sky-100 text-sky-700 border-2 border-sky-300"}`}>
                                 {line.speaker === "Ahmed" ? "👦" : line.speaker === "Badr" ? "👶" : line.speaker === "Cathy" ? "👧" : "👩"}
                               </div>
-                              <div className={`flex-1 p-5 rounded-[24px] shadow-sm border-b-6 border-r-6 ${isSpecial ? "bg-amber-50/60 border-amber-200" : "bg-slate-50/70 border-slate-200"}`}>
+                              <div 
+                                onClick={() => speakText(line.text, line.voice)}
+                                className={`flex-1 p-5 rounded-[24px] shadow-sm border-b-6 border-r-6 cursor-pointer hover:scale-[1.01] transition-all ${
+                                  isSpecial 
+                                    ? isPlaying 
+                                      ? "bg-amber-100/90 border-amber-400 text-amber-950 scale-[1.01]" 
+                                      : "bg-amber-50/60 border-amber-200 hover:border-amber-400 text-slate-800"
+                                    : isPlaying 
+                                      ? "bg-sky-100/90 border-sky-400 text-sky-950 scale-[1.01]" 
+                                      : "bg-slate-50/70 border-slate-200 hover:border-sky-400 text-slate-800"
+                                }`}
+                              >
                                 <div className="flex justify-between items-center mb-1">
                                   <span className="text-xs font-black text-slate-500 uppercase tracking-widest">{line.speaker}</span>
-                                  <button
-                                    onClick={() => speakText(line.text, line.voice)}
-                                    className="text-slate-400 hover:text-blue-600 transition-colors p-1"
-                                    title="Click to Listen"
-                                  >
-                                    {speakingText === line.text && audioPlaybackActive ? (
+                                  <div className="text-slate-400 p-1">
+                                    {isPlaying ? (
                                       <VolumeX className="w-5 h-5 text-red-500 animate-pulse" />
                                     ) : (
                                       <Volume2 className="w-5 h-5 text-slate-500 hover:scale-110 transition-transform" />
                                     )}
-                                  </button>
+                                  </div>
                                 </div>
-                                <p className="text-[16px] font-black text-sky-950">{line.text}</p>
+                                <p className="text-[16px] font-black leading-snug">{line.text}</p>
                               </div>
                             </div>
                           );
@@ -520,16 +632,16 @@ export default function App() {
                       {selectedUnit.words.map((w) => (
                         <div
                           key={w.id}
-                          className="bg-white border-b-6 border-r-6 border-slate-200 hover:border-sky-300 rounded-[24px] p-4 shadow-sm hover:shadow-md transition-all flex flex-col items-center gap-1.5 relative group justify-between cursor-pointer"
+                          onClick={() => speakText(w.word, "Kore")}
+                          className="bg-white border-b-6 border-r-6 border-slate-200 hover:border-sky-300 hover:scale-[1.02] rounded-[24px] p-4 shadow-sm hover:shadow-md transition-all flex flex-col items-center gap-1.5 relative group justify-between cursor-pointer"
                         >
                           <div className="absolute right-2 top-2">
-                            <button
-                              onClick={() => speakText(w.word, "Kore")}
-                              className="text-slate-400 group-hover:text-blue-600 transition-colors p-2"
+                            <span
+                              className="text-slate-400 group-hover:text-blue-600 transition-colors p-2 block"
                               title="Listen to Word"
                             >
                               <Volume2 className="w-5 h-5" />
-                            </button>
+                            </span>
                           </div>
                           
                           <span className="text-5xl mt-3 group-hover:scale-110 transition-transform">{w.image}</span>
@@ -568,7 +680,8 @@ export default function App() {
                     {selectedUnit.words.map((w) => (
                       <div 
                         key={w.id} 
-                        className="bg-white rounded-[28px] p-5 shadow-sm border-b-6 border-r-6 border-slate-200/90 hover:border-teal-400 flex items-center gap-4 transition-all group cursor-pointer"
+                        onClick={() => speakText(w.word, "Kore")}
+                        className="bg-white rounded-[28px] p-5 shadow-sm border-b-6 border-r-6 border-slate-200/90 hover:border-teal-400 hover:scale-[1.01] flex items-center gap-4 transition-all group cursor-pointer"
                       >
                         <div className="text-5xl p-3 bg-slate-50 border-2 border-slate-100 rounded-[20px] transition-transform group-hover:rotate-6">{w.image}</div>
                         <div className="flex-1 min-w-0">
@@ -583,14 +696,20 @@ export default function App() {
                         </div>
                         <div className="flex flex-col gap-2">
                           <button
-                            onClick={() => speakText(w.word, "Kore")}
-                            className="bg-teal-50 hover:bg-teal-100 text-teal-700 p-3 rounded-full shadow-sm transition-all cursor-pointer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              speakText(w.word, "Kore");
+                            }}
+                            className="bg-teal-50 hover:bg-teal-100 text-teal-700 p-3 rounded-full shadow-sm transition-all cursor-pointer flex items-center justify-center"
                             title="Hear individual word"
                           >
                             <Volume2 className="w-5 h-5" />
                           </button>
                           <button
-                            onClick={() => speakText(w.soundText, "Zephyr")}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              speakText(w.soundText, "Zephyr");
+                            }}
                             className="bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] uppercase font-black px-2.5 py-1.5 rounded-[12px] border-b-4 border-emerald-700 transition-all cursor-pointer shadow-sm text-center"
                             title="Hear example sentence"
                           >
