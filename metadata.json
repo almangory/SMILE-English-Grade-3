@@ -1,0 +1,6 @@
+{
+  "name": "SMILE English Grade 3",
+  "description": "An interactive, visually rich, and fully narrated educational app for children learning the Sudan Grade 3 English curriculum (SMILE Series).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
