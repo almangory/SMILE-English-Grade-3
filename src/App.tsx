@@ -45,7 +45,7 @@ export default function App() {
   // Audio state
   const [speakingText, setSpeakingText] = useState<string | null>(null);
   const [audioPlaybackActive, setAudioPlaybackActive] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   // Warm up system voices queue
   useEffect(() => {
@@ -104,8 +104,8 @@ export default function App() {
   const speakText = (text: string, voiceName: string = "Kore") => {
     // If the exact same text is playing, toggle pause
     if (speakingText === text && audioPlaybackActive) {
-      if (audioRef.current) {
-        audioRef.current.pause();
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
       }
       window.speechSynthesis.cancel();
       setAudioPlaybackActive(false);
@@ -114,9 +114,8 @@ export default function App() {
     }
 
     // Cancel any previous audio immediately (prevents overlapping/stuck sounds)
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
     }
     window.speechSynthesis.cancel();
 
@@ -130,27 +129,32 @@ export default function App() {
     }
 
     try {
-      // Direct stream URL using our highly reliable, free, non-AI Google Translation server-side pipe
-      const audioUrl = `/api/tts?text=${encodeURIComponent(text)}`;
-      const audio = new Audio(audioUrl);
-      audioRef.current = audio;
-      
-      audio.onended = () => {
-        setAudioPlaybackActive(false);
-        setSpeakingText(null);
-      };
-      audio.onerror = (e) => {
-        console.warn("Direct stream play failed, trying system speech synthesis fallback:", e);
-        fallbackSpeechSynthesis(text);
-      };
-
-      // Play instantly inside the user click microtask thread
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise.catch((err) => {
-          console.warn("Autoplay block detected on direct stream, falling back:", err);
+      if (audioPlayerRef.current) {
+        const origin = window.location.origin || "";
+        const audioUrl = `${origin}/api/tts?text=${encodeURIComponent(text)}`;
+        
+        audioPlayerRef.current.src = audioUrl;
+        audioPlayerRef.current.load(); // Force load before play
+        
+        audioPlayerRef.current.onended = () => {
+          setAudioPlaybackActive(false);
+          setSpeakingText(null);
+        };
+        
+        audioPlayerRef.current.onerror = (e) => {
+          console.warn("Direct stream play failed on tag, trying system speech synthesis fallback:", e);
           fallbackSpeechSynthesis(text);
-        });
+        };
+
+        const playPromise = audioPlayerRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            console.warn("Autoplay block or failure detected on audio tag, falling back:", err);
+            fallbackSpeechSynthesis(text);
+          });
+        }
+      } else {
+        fallbackSpeechSynthesis(text);
       }
     } catch (err) {
       console.warn("Audio element setup failed. Falling back:", err);
@@ -296,12 +300,14 @@ export default function App() {
               {SMILE_UNITS.map((u) => {
                 const isSelected = selectedUnit.id === u.id;
                 return (
-                  <button
+                  <motion.button
                     key={u.id}
                     onClick={() => handleUnitSelect(u)}
-                    className={`w-full text-left p-3.5 rounded-[24px] border-b-4 transition-all flex items-start gap-3 relative transform hover:scale-[1.02] cursor-pointer ${
+                    whileHover={{ scale: 1.03, y: -2 }}
+                    whileTap={{ scale: 0.97 }}
+                    className={`w-full text-left p-3.5 rounded-[24px] border-b-4 transition-all flex items-start gap-3 relative cursor-pointer ${
                       isSelected 
-                        ? `${u.color} shadow-md border-amber-600 font-bold scale-[1.02] text-amber-950` 
+                        ? `${u.color} shadow-md border-amber-600 font-bold text-amber-950` 
                         : "bg-slate-50 hover:bg-slate-100 border-slate-300 text-slate-700"
                     }`}
                   >
@@ -311,7 +317,7 @@ export default function App() {
                       <div className="text-[13px] truncate leading-tight font-black uppercase text-sky-950">{u.title}</div>
                       <div className="text-[11px] opacity-90 font-medium block leading-tight mt-0.5">{u.arabicTitle}</div>
                     </div>
-                  </button>
+                  </motion.button>
                 );
               })}
             </div>
@@ -543,15 +549,17 @@ export default function App() {
                               <div className={`p-3 rounded-[20px] text-3xl font-black shadow-sm select-none ${isSpecial ? "bg-amber-100 text-amber-700 border-2 border-amber-300" : "bg-sky-100 text-sky-700 border-2 border-sky-300"}`}>
                                 {line.speaker === "Ahmed" ? "👦" : line.speaker === "Badr" ? "👶" : line.speaker === "Cathy" ? "👧" : "👩"}
                               </div>
-                              <div 
+                              <motion.div 
                                 onClick={() => speakText(line.text, line.voice)}
-                                className={`flex-1 p-5 rounded-[24px] shadow-sm border-b-6 border-r-6 cursor-pointer hover:scale-[1.01] transition-all ${
+                                whileHover={{ scale: 1.02 }}
+                                whileTap={{ scale: 0.98 }}
+                                className={`flex-1 p-5 rounded-[24px] shadow-sm border-b-6 border-r-6 cursor-pointer transition-all ${
                                   isSpecial 
                                     ? isPlaying 
-                                      ? "bg-amber-100/90 border-amber-400 text-amber-950 scale-[1.01]" 
+                                      ? "bg-amber-100/90 border-amber-400 text-amber-950" 
                                       : "bg-amber-50/60 border-amber-200 hover:border-amber-400 text-slate-800"
                                     : isPlaying 
-                                      ? "bg-sky-100/90 border-sky-400 text-sky-950 scale-[1.01]" 
+                                      ? "bg-sky-100/90 border-sky-400 text-sky-950" 
                                       : "bg-slate-50/70 border-slate-200 hover:border-sky-400 text-slate-800"
                                 }`}
                               >
@@ -566,7 +574,7 @@ export default function App() {
                                   </div>
                                 </div>
                                 <p className="text-[16px] font-black leading-snug">{line.text}</p>
-                              </div>
+                              </motion.div>
                             </div>
                           );
                         })}
@@ -578,14 +586,16 @@ export default function App() {
                       <div className="flex flex-col gap-6 text-center">
                         <div className="flex items-center justify-center gap-4 py-2 flex-wrap">
                           {selectedLesson.content.letters.map((l) => (
-                            <button
+                            <motion.button
                               key={l}
                               onClick={() => speakText(`Letter ${l} says, /${l}/ pronunciation`, "Zephyr")}
-                              className="w-20 h-20 rounded-[24px] bg-white hover:bg-slate-50 border-b-6 border-r-6 border-slate-300 shadow-sm flex flex-col items-center justify-center transition-all transform hover:scale-[1.05] active:translate-y-1 cursor-pointer group"
+                              whileHover={{ scale: 1.1, rotate: 2 }}
+                              whileTap={{ scale: 0.9 }}
+                              className="w-20 h-20 rounded-[24px] bg-white hover:bg-slate-50 border-b-6 border-r-6 border-slate-300 shadow-sm flex flex-col items-center justify-center transition-all cursor-pointer group"
                             >
                               <span className="text-4xl font-black text-sky-500 uppercase group-hover:text-indigo-600 leading-none">{l}</span>
                               <span className="text-[10px] text-slate-400 font-extrabold italic uppercase mt-1">say /{l}/</span>
-                            </button>
+                            </motion.button>
                           ))}
                         </div>
 
@@ -627,10 +637,12 @@ export default function App() {
                     </h3>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                       {selectedUnit.words.map((w) => (
-                        <div
+                        <motion.div
                           key={w.id}
                           onClick={() => speakText(w.word, "Kore")}
-                          className="bg-white border-b-6 border-r-6 border-slate-200 hover:border-sky-300 hover:scale-[1.02] rounded-[24px] p-4 shadow-sm hover:shadow-md transition-all flex flex-col items-center gap-1.5 relative group justify-between cursor-pointer"
+                          whileHover={{ scale: 1.04, y: -4, rotate: 1 }}
+                          whileTap={{ scale: 0.95 }}
+                          className="bg-white border-b-6 border-r-6 border-slate-200 hover:border-sky-300 rounded-[24px] p-4 shadow-sm hover:shadow-md transition-all flex flex-col items-center gap-1.5 relative group justify-between cursor-pointer"
                         >
                           <div className="absolute right-2 top-2">
                             <span
@@ -649,7 +661,7 @@ export default function App() {
                               {w.example}
                             </span>
                           </div>
-                        </div>
+                        </motion.div>
                       ))}
                     </div>
                   </div>
@@ -675,10 +687,12 @@ export default function App() {
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {selectedUnit.words.map((w) => (
-                      <div 
+                      <motion.div 
                         key={w.id} 
                         onClick={() => speakText(w.word, "Kore")}
-                        className="bg-white rounded-[28px] p-5 shadow-sm border-b-6 border-r-6 border-slate-200/90 hover:border-teal-400 hover:scale-[1.01] flex items-center gap-4 transition-all group cursor-pointer"
+                        whileHover={{ scale: 1.03, y: -2 }}
+                        whileTap={{ scale: 0.98 }}
+                        className="bg-white rounded-[28px] p-5 shadow-sm border-b-6 border-r-6 border-slate-200/90 hover:border-teal-400 flex items-center gap-4 transition-all group cursor-pointer"
                       >
                         <div className="text-5xl p-3 bg-slate-50 border-2 border-slate-100 rounded-[20px] transition-transform group-hover:rotate-6">{w.image}</div>
                         <div className="flex-1 min-w-0">
@@ -713,7 +727,7 @@ export default function App() {
                             Sentence
                           </button>
                         </div>
-                      </div>
+                      </motion.div>
                     ))}
                   </div>
 
@@ -1003,6 +1017,9 @@ export default function App() {
           </div>
         </main>
       </div>
+
+      {/* Hidden Audio Player for absolute compatibility in iframe sandbox contexts */}
+      <audio ref={audioPlayerRef} className="hidden" aria-hidden="true" />
 
       {/* Sudan Modern Learning Pupil English Footer Credits */}
       <footer className="max-w-6xl w-full mx-auto mt-8 py-6 text-center text-sky-700/60 font-semibold border-t border-sky-100">
