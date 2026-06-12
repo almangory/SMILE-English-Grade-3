@@ -36,6 +36,35 @@ try {
 }
 
 // Text-to-Speech API
+app.get("/api/tts", async (req, res) => {
+  const { text } = req.query;
+  if (!text || typeof text !== "string") {
+    return res.status(400).send("Text is required");
+  }
+
+  const cleanText = text.trim();
+  try {
+    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=en&client=tw-ob&q=${encodeURIComponent(cleanText)}`;
+    const googleRes = await fetch(ttsUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
+      }
+    });
+    if (!googleRes.ok) {
+      throw new Error(`Google Translate TTS status error: ${googleRes.status}`);
+    }
+    const buffer = await googleRes.arrayBuffer();
+    res.set({
+      "Content-Type": "audio/mpeg",
+      "Cache-Control": "public, max-age=31536000, immutable",
+    });
+    return res.send(Buffer.from(buffer));
+  } catch (err: any) {
+    console.error("GET tts stream error:", err.message);
+    return res.status(500).send("Error generating audio stream");
+  }
+});
+
 app.post("/api/tts", async (req, res) => {
   const { text, voice = "Kore" } = req.body;
 

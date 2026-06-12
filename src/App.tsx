@@ -101,7 +101,7 @@ export default function App() {
   };
 
   // Text-To-Speech function using full-stack API or speech synthesis fallback
-  const speakText = async (text: string, voiceName: string = "Kore") => {
+  const speakText = (text: string, voiceName: string = "Kore") => {
     // If the exact same text is playing, toggle pause
     if (speakingText === text && audioPlaybackActive) {
       if (audioRef.current) {
@@ -130,33 +130,30 @@ export default function App() {
     }
 
     try {
-      const response = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voice: voiceName }),
-      });
-      const data = await response.json();
-
-      if (data.audio) {
-        // Play base64 audio
-        const audioUrl = `data:audio/mp3;base64,${data.audio}`;
-        const audio = new Audio(audioUrl);
-        audioRef.current = audio;
-        audio.onended = () => {
-          setAudioPlaybackActive(false);
-          setSpeakingText(null);
-        };
-        audio.onerror = () => {
-          setAudioPlaybackActive(false);
-          setSpeakingText(null);
-        };
-        await audio.play();
-      } else {
-        // Fallback to browser SpeechSynthesis
+      // Direct stream URL using our highly reliable, free, non-AI Google Translation server-side pipe
+      const audioUrl = `/api/tts?text=${encodeURIComponent(text)}`;
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+      
+      audio.onended = () => {
+        setAudioPlaybackActive(false);
+        setSpeakingText(null);
+      };
+      audio.onerror = (e) => {
+        console.warn("Direct stream play failed, trying system speech synthesis fallback:", e);
         fallbackSpeechSynthesis(text);
+      };
+
+      // Play instantly inside the user click microtask thread
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn("Autoplay block detected on direct stream, falling back:", err);
+          fallbackSpeechSynthesis(text);
+        });
       }
     } catch (err) {
-      console.warn("API TTS failed. Using browser speech synthesis fallback:", err);
+      console.warn("Audio element setup failed. Falling back:", err);
       fallbackSpeechSynthesis(text);
     }
   };
@@ -328,27 +325,10 @@ export default function App() {
             </h3>
             
             <p className="text-[11px] font-extrabold text-slate-500 leading-snug">
-              إذا واجهت أي مشكلة في نطق الكلمات، اختر نوع الصوت المناسب واضغط على زر التفعيل لتنشيط الصوت:
+              الآن الصوت مدمج بالكامل ومجاني! إذا واجهت أي مشكلة، يمكنك التبديل بين مشغلات الصوت أدناه ثم الضغط على زر التجربة:
             </p>
 
             <div className="flex flex-col gap-2 mt-1">
-              <button
-                onClick={() => setVoiceMode("system")}
-                className={`w-full text-left p-3 rounded-[16px] border-b-4 transition-all flex items-center justify-between cursor-pointer ${
-                  voiceMode === "system"
-                    ? "bg-indigo-600 border-indigo-800 text-white font-black"
-                    : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 font-bold"
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <span className="text-md">⚡</span>
-                  <div className="flex flex-col">
-                    <span className="text-[12px] leading-tight">System Voice (Instant)</span>
-                    <span className="text-[10px] opacity-80 leading-tight">صوت الجهاز (فوري ومضمون)</span>
-                  </div>
-                </div>
-              </button>
-
               <button
                 onClick={() => setVoiceMode("gemini")}
                 className={`w-full text-left p-3 rounded-[16px] border-b-4 transition-all flex items-center justify-between cursor-pointer ${
@@ -360,8 +340,25 @@ export default function App() {
                 <div className="flex items-center gap-1.5">
                   <span className="text-md">✨</span>
                   <div className="flex flex-col">
-                    <span className="text-[12px] leading-tight">AI Voice (Premium)</span>
-                    <span className="text-[10px] opacity-80 leading-tight">صوت الذكاء الاصطناعي بدقة</span>
+                    <span className="text-[12px] leading-tight">Embedded Voice (Free & Fast)</span>
+                    <span className="text-[10px] opacity-80 leading-tight">صوت الموقع المدمج (مجاني فوري)</span>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => setVoiceMode("system")}
+                className={`w-full text-left p-3 rounded-[16px] border-b-4 transition-all flex items-center justify-between cursor-pointer ${
+                  voiceMode === "system"
+                    ? "bg-indigo-600 border-indigo-800 text-white font-black"
+                    : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 font-bold"
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="text-md">⚡</span>
+                  <div className="flex flex-col">
+                    <span className="text-[12px] leading-tight">Device System Voice</span>
+                    <span className="text-[10px] opacity-80 leading-tight">صوت النظام المحلي بالجهاز</span>
                   </div>
                 </div>
               </button>
@@ -372,7 +369,7 @@ export default function App() {
               className="mt-1 w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs uppercase py-3 px-4 rounded-[16px] border-b-4 border-emerald-700 transition-all flex items-center justify-center gap-2 cursor-pointer transform active:translate-y-0.5"
             >
               <Volume2 className="w-4 h-4" />
-              <span>Test & Unlock • تجربة وتفعيل الصوت</span>
+              <span>Test & Play • تجربة وتشغيل الصوت</span>
             </button>
           </div>
 
