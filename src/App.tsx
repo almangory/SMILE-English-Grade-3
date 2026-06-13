@@ -119,46 +119,71 @@ export default function App() {
     }
     window.speechSynthesis.cancel();
 
-    setSpeakingText(text);
+    const cleanText = text.trim();
+    setSpeakingText(cleanText);
     setAudioPlaybackActive(true);
 
     // If System Voice mode is selected, speak synchronously to guarantee user-gesture context is kept intact
     if (voiceMode === "system") {
-      fallbackSpeechSynthesis(text);
+      fallbackSpeechSynthesis(cleanText);
       return;
     }
 
-    try {
-      if (audioPlayerRef.current) {
-        const origin = window.location.origin || "";
-        const audioUrl = `${origin}/api/tts?text=${encodeURIComponent(text)}`;
-        
-        audioPlayerRef.current.src = audioUrl;
-        audioPlayerRef.current.load(); // Force load before play
-        
-        audioPlayerRef.current.onended = () => {
-          setAudioPlaybackActive(false);
-          setSpeakingText(null);
-        };
-        
-        audioPlayerRef.current.onerror = (e) => {
-          console.warn("Direct stream play failed on tag, trying system speech synthesis fallback:", e);
-          fallbackSpeechSynthesis(text);
-        };
+    // List of premium, super fast free client-side and server-side TTS providers
+    const sources = [
+      `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(cleanText)}&type=2`, // US English (Highly resilient & clears iframe barriers)
+      `https://translate.google.com/translate_tts?ie=UTF-8&tl=en&client=tw-ob&q=${encodeURIComponent(cleanText)}`, // Google Translate Direct client-use
+      `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(cleanText)}&type=1`, // UK English
+      `/api/tts?text=${encodeURIComponent(cleanText)}` // Server proxy self-healing endpoint
+    ];
 
-        const playPromise = audioPlayerRef.current.play();
-        if (playPromise !== undefined) {
-          playPromise.catch((err) => {
-            console.warn("Autoplay block or failure detected on audio tag, falling back:", err);
-            fallbackSpeechSynthesis(text);
-          });
-        }
-      } else {
-        fallbackSpeechSynthesis(text);
+    let currentSourceIndex = 0;
+
+    const playNextSource = () => {
+      if (!audioPlayerRef.current) {
+        fallbackSpeechSynthesis(cleanText);
+        return;
       }
+
+      if (currentSourceIndex >= sources.length) {
+        console.warn("All direct stream providers failed or timed out. Defaulting to local System voice.");
+        fallbackSpeechSynthesis(cleanText);
+        return;
+      }
+
+      const activeUrl = sources[currentSourceIndex];
+      
+      // Assign source
+      audioPlayerRef.current.src = activeUrl;
+      audioPlayerRef.current.load(); // Prepare media decoder
+
+      audioPlayerRef.current.onended = () => {
+        setAudioPlaybackActive(false);
+        setSpeakingText(null);
+      };
+
+      audioPlayerRef.current.onerror = (e) => {
+        console.warn(`Source #${currentSourceIndex} (${activeUrl}) failed to load. Trying next provider.`);
+        currentSourceIndex++;
+        playNextSource();
+      };
+
+      const playPromise = audioPlayerRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn(`Autoplay or play issue with provider #${currentSourceIndex}:`, err);
+          // Auto cascade to next source
+          currentSourceIndex++;
+          playNextSource();
+        });
+      }
+    };
+
+    try {
+      playNextSource();
     } catch (err) {
-      console.warn("Audio element setup failed. Falling back:", err);
-      fallbackSpeechSynthesis(text);
+      console.warn("Audio element play sequence crashed, reverting to local voice synthesizer:", err);
+      fallbackSpeechSynthesis(cleanText);
     }
   };
 
@@ -402,7 +427,9 @@ export default function App() {
           
           {/* Main Interactive Sub-tabs selection - Bento Style */}
           <div className="bg-white rounded-[32px] p-2 shadow-sm border-b-6 border-sky-100 flex flex-wrap gap-1.5">
-            <button
+            <motion.button
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
               onClick={() => setActiveTab("book")}
               className={`flex-1 min-w-[110px] py-4 px-3 rounded-[24px] font-black text-xs uppercase tracking-wider transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${
                 activeTab === "book"
@@ -413,9 +440,11 @@ export default function App() {
               <BookOpen className="w-5 h-5 mb-0.5" />
               <span>Pupil's Book</span>
               <span className="text-[10px] opacity-80 font-bold">كتاب الطالب</span>
-            </button>
+            </motion.button>
 
-            <button
+            <motion.button
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
               onClick={() => setActiveTab("dictionary")}
               className={`flex-1 min-w-[110px] py-4 px-3 rounded-[24px] font-black text-xs uppercase tracking-wider transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${
                 activeTab === "dictionary"
@@ -426,9 +455,11 @@ export default function App() {
               <Compass className="w-5 h-5 mb-0.5" />
               <span>Vocabulary</span>
               <span className="text-[10px] opacity-80 font-bold">المفردات والكلمات</span>
-            </button>
+            </motion.button>
 
-            <button
+            <motion.button
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
               onClick={() => setActiveTab("quiz")}
               className={`flex-1 min-w-[110px] py-4 px-3 rounded-[24px] font-black text-xs uppercase tracking-wider transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${
                 activeTab === "quiz"
@@ -439,9 +470,11 @@ export default function App() {
               <Gamepad2 className="w-5 h-5 mb-0.5" />
               <span>Quiz Games</span>
               <span className="text-[10px] opacity-80 font-bold">المسابقات والألعاب</span>
-            </button>
+            </motion.button>
 
-            <button
+            <motion.button
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
               onClick={() => setActiveTab("adventure")}
               className={`flex-1 min-w-[110px] py-4 px-3 rounded-[24px] font-black text-xs uppercase tracking-wider transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${
                 activeTab === "adventure"
@@ -452,7 +485,7 @@ export default function App() {
               <Smile className="w-5 h-5 mb-0.5" />
               <span>AI Chat Partner</span>
               <span className="text-[10px] opacity-80 font-bold">ركن المحادثة</span>
-            </button>
+            </motion.button>
           </div>
 
           {/* ACTIVE CONTENT WORKSPACE AREA WITH BENTO STYLING AND GRAPHICS */}
@@ -516,9 +549,11 @@ export default function App() {
                             "{selectedLesson.content.songText}"
                           </p>
                         </div>
-                        <button
+                        <motion.button
+                          whileHover={{ scale: 1.05, y: -2 }}
+                          whileTap={{ scale: 0.95 }}
                           onClick={() => speakText(selectedLesson.content.songText || "")}
-                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase py-4 px-8 rounded-[24px] shadow-[0_5px_0_0_#4338ca] hover:shadow-[0_2px_0_0_#4338ca] transition-all flex items-center gap-2 transform active:translate-y-1"
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase py-4 px-8 rounded-[24px] shadow-[0_5px_0_0_#4338ca] hover:shadow-[0_2px_0_0_#4338ca] transition-all flex items-center justify-center gap-2 transform active:translate-y-1 cursor-pointer"
                         >
                           {speakingText === selectedLesson.content.songText && audioPlaybackActive ? (
                             <>
@@ -531,7 +566,7 @@ export default function App() {
                               <span>Listen and Sing! 🎙</span>
                             </>
                           )}
-                        </button>
+                        </motion.button>
                       </div>
                     )}
 
@@ -608,10 +643,12 @@ export default function App() {
                               <p className="font-black text-slate-800 text-md">{selectedLesson.content.games[0].question}</p>
                               <div className="grid grid-cols-2 gap-3 mt-4">
                                 {selectedLesson.content.games[0].answers.map((option) => (
-                                  <button
+                                  <motion.button
                                     key={option}
+                                    whileHover={{ scale: 1.05, rotate: 1 }}
+                                    whileTap={{ scale: 0.95 }}
                                     onClick={() => handleQuizAnswerSubmit(option, 0, 1, selectedLesson.content.games || [])}
-                                    className={`py-3 px-4 rounded-[20px] border-b-4 border-r-4 font-black text-sm uppercase tracking-wider transition-all text-center cursor-pointer transform active:scale-95 ${
+                                    className={`py-3 px-4 rounded-[20px] border-b-4 border-r-4 font-black text-sm uppercase tracking-wider transition-all text-center cursor-pointer ${
                                       selectedAnswer === option
                                         ? option === selectedLesson.content.games?.[0].correctAnswer
                                           ? "bg-emerald-500 border-emerald-700 text-white"
@@ -620,7 +657,7 @@ export default function App() {
                                     }`}
                                   >
                                     {option}
-                                  </button>
+                                  </motion.button>
                                 ))}
                               </div>
                             </div>
@@ -831,16 +868,18 @@ export default function App() {
                             }
 
                             return (
-                              <button
+                              <motion.button
                                 key={option}
                                 disabled={selectedAnswer !== null}
+                                whileHover={{ scale: selectedAnswer ? 1 : 1.04, rotate: selectedAnswer ? 0 : 0.5 }}
+                                whileTap={{ scale: selectedAnswer ? 1 : 0.96 }}
                                 onClick={() => handleQuizAnswerSubmit(option, currentQuizIndex, quizQuestionsList.length, quizQuestionsList)}
-                                className={`py-4 px-5 rounded-[20px] text-center font-black text-[15px] transition-all transform active:scale-95 cursor-pointer flex items-center justify-between uppercase tracking-wide ${buttonStyle}`}
+                                className={`py-4 px-5 rounded-[20px] text-center font-black text-[15px] transition-all cursor-pointer flex items-center justify-between uppercase tracking-wide ${buttonStyle}`}
                               >
                                 <span>{option}</span>
                                 {selectedAnswer && isCorrect && <Check className="w-5 h-5 text-white" />}
                                 {selectedAnswer && isSelected && !isCorrect && <span className="text-white text-xs font-black font-mono">X</span>}
-                              </button>
+                              </motion.button>
                             );
                           })}
                         </div>
@@ -959,30 +998,38 @@ export default function App() {
                       💡 Tap an expression to answer instantly:
                     </span>
                     <div className="flex flex-wrap gap-2">
-                      <button
+                      <motion.button
+                        whileHover={{ scale: 1.05, y: -2 }}
+                        whileTap={{ scale: 0.95 }}
                         onClick={() => sendChatMessage("Hello! My name is Khalid, nice to meet you!")}
-                        className="bg-white hover:bg-slate-50 border-b-4 border-r-4 border-slate-300 text-xs py-2.5 px-4 rounded-[20px] font-black uppercase tracking-wider text-slate-700 shadow-sm transition-transform active:scale-95 cursor-pointer"
+                        className="bg-white hover:bg-slate-50 border-b-4 border-r-4 border-slate-300 text-xs py-2.5 px-4 rounded-[20px] font-black uppercase tracking-wider text-slate-700 shadow-sm cursor-pointer"
                       >
                         👋 Khalid!
-                      </button>
-                      <button
+                      </motion.button>
+                      <motion.button
+                        whileHover={{ scale: 1.05, y: -2 }}
+                        whileTap={{ scale: 0.95 }}
                         onClick={() => sendChatMessage("How are you Badr?")}
-                        className="bg-white hover:bg-slate-50 border-b-4 border-r-4 border-slate-300 text-xs py-2.5 px-4 rounded-[20px] font-black uppercase tracking-wider text-slate-700 shadow-sm transition-transform active:scale-95 cursor-pointer"
+                        className="bg-white hover:bg-slate-50 border-b-4 border-r-4 border-slate-300 text-xs py-2.5 px-4 rounded-[20px] font-black uppercase tracking-wider text-slate-700 shadow-sm cursor-pointer"
                       >
                         ❓ How are you?
-                      </button>
-                      <button
+                      </motion.button>
+                      <motion.button
+                        whileHover={{ scale: 1.05, y: -2 }}
+                        whileTap={{ scale: 0.95 }}
                         onClick={() => sendChatMessage("I am nine years old!")}
-                        className="bg-white hover:bg-slate-50 border-b-4 border-r-4 border-slate-300 text-xs py-2.5 px-4 rounded-[20px] font-black uppercase tracking-wider text-slate-700 shadow-sm transition-transform active:scale-95 cursor-pointer"
+                        className="bg-white hover:bg-slate-50 border-b-4 border-r-4 border-slate-300 text-xs py-2.5 px-4 rounded-[20px] font-black uppercase tracking-wider text-slate-700 shadow-sm cursor-pointer"
                       >
                         🎂 Nine Years Old
-                      </button>
-                      <button
+                      </motion.button>
+                      <motion.button
+                        whileHover={{ scale: 1.05, y: -2 }}
+                        whileTap={{ scale: 0.95 }}
                         onClick={() => sendChatMessage("I live in Khartoum, Sudan.")}
-                        className="bg-white hover:bg-slate-50 border-b-4 border-r-4 border-slate-300 text-xs py-2.5 px-4 rounded-[20px] font-black uppercase tracking-wider text-slate-700 shadow-sm transition-transform active:scale-95 cursor-pointer"
+                        className="bg-white hover:bg-slate-50 border-b-4 border-r-4 border-slate-300 text-xs py-2.5 px-4 rounded-[20px] font-black uppercase tracking-wider text-slate-700 shadow-sm cursor-pointer"
                       >
                         🌍 Khartoum Sudan
-                      </button>
+                      </motion.button>
                     </div>
                   </div>
 

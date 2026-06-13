@@ -60,8 +60,23 @@ app.get("/api/tts", async (req, res) => {
     });
     return res.send(Buffer.from(buffer));
   } catch (err: any) {
-    console.error("GET tts stream error:", err.message);
-    return res.status(500).send("Error generating audio stream");
+    console.warn("GET tts stream error via Google, trying Youdao Dict fallback:", err.message);
+    try {
+      const fallbackUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(cleanText)}&type=2`;
+      const fallbackRes = await fetch(fallbackUrl);
+      if (!fallbackRes.ok) {
+        throw new Error(`Youdao Dict TTS status error: ${fallbackRes.status}`);
+      }
+      const buffer = await fallbackRes.arrayBuffer();
+      res.set({
+        "Content-Type": "audio/mpeg",
+        "Cache-Control": "public, max-age=31536000, immutable",
+      });
+      return res.send(Buffer.from(buffer));
+    } catch (fallbackErr: any) {
+      console.error("All server-side TTS engines failed:", fallbackErr.message);
+      return res.status(500).send("Error generating audio stream");
+    }
   }
 });
 
@@ -80,19 +95,33 @@ app.post("/api/tts", async (req, res) => {
     return res.json({ audio: audioCache[cacheKey] });
   }
 
-  // Define a stable, zero-dependency server-side helper to fetch Google Translate TTS
+  // Define a stable, zero-dependency server-side helper to fetch Google Translate/Youdao TTS
   const fetchTranslateTTS = async (phrase: string): Promise<string> => {
-    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=en&client=tw-ob&q=${encodeURIComponent(phrase)}`;
-    const googleRes = await fetch(ttsUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
+    try {
+      const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=en&client=tw-ob&q=${encodeURIComponent(phrase)}`;
+      const googleRes = await fetch(ttsUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
+        }
+      });
+      if (!googleRes.ok) throw new Error(`Google status error: ${googleRes.status}`);
+      const buffer = await googleRes.arrayBuffer();
+      return Buffer.from(buffer).toString("base64");
+    } catch (e: any) {
+      console.warn("Google Translate TTS block inside fetchTranslateTTS, falling back to Youdao:", e.message || e);
+      try {
+        const fallbackUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(phrase)}&type=2`;
+        const fallbackRes = await fetch(fallbackUrl);
+        if (!fallbackRes.ok) {
+          throw new Error(`Youdao status error: ${fallbackRes.status}`);
+        }
+        const buffer = await fallbackRes.arrayBuffer();
+        return Buffer.from(buffer).toString("base64");
+      } catch (err: any) {
+        console.error("All server-side fetch helpers failed:", err.message || err);
+        throw err;
       }
-    });
-    if (!googleRes.ok) {
-      throw new Error(`Google Translate TTS status error: ${googleRes.status}`);
     }
-    const buffer = await googleRes.arrayBuffer();
-    return Buffer.from(buffer).toString("base64");
   };
 
   if (!ai) {
