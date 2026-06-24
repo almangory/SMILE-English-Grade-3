@@ -39,10 +39,44 @@ import { WORKSHEETS } from "./worksheetsData";
 export default function App() {
   const [selectedUnit, setSelectedUnit] = useState<UnitItem>(SMILE_UNITS[0]);
   const [selectedLesson, setSelectedLesson] = useState<Lesson>(SMILE_UNITS[0].lessons[0]);
-  const [activeTab, setActiveTab] = useState<"book" | "dictionary" | "quiz" | "adventure" | "syllabus" | "worksheets">("book");
+  const [activeTab, setActiveTab] = useState<"book" | "dictionary" | "quiz" | "adventure" | "syllabus" | "worksheets" | "games">("book");
   
   // Voice selection mode (Vibrant server-side AI Voice with zero-config HTML5 audio fallbacks)
   const [voiceMode, setVoiceMode] = useState<"system" | "gemini">("gemini");
+
+  // Fullscreen state
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Kids Fun Educational Games states
+  const [currentGame, setCurrentGame] = useState<"balloon" | "memory" | "spelling" | null>(null);
+  
+  // 1. Balloon Pop Game states
+  const [balloonTarget, setBalloonTarget] = useState<WordItem | null>(null);
+  const [balloonOptions, setBalloonOptions] = useState<WordItem[]>([]);
+  const [balloonScore, setBalloonScore] = useState(0);
+  const [balloonRound, setBalloonRound] = useState(1);
+  const [balloonCompleted, setBalloonCompleted] = useState(false);
+
+  // 2. Memory Match states
+  const [memoryCards, setMemoryCards] = useState<Array<{
+    id: string;
+    type: "word" | "image";
+    content: string;
+    word: string;
+    isFlipped: boolean;
+    isMatched: boolean;
+  }>>([]);
+  const [memorySelected, setMemorySelected] = useState<number[]>([]);
+  const [memoryMoves, setMemoryMoves] = useState(0);
+  const [memoryCompleted, setMemoryCompleted] = useState(false);
+
+  // 3. Spelling Bee / Word Builder states
+  const [spellingTarget, setSpellingTarget] = useState<WordItem | null>(null);
+  const [spellingLetters, setSpellingLetters] = useState<string[]>([]);
+  const [spellingBlanks, setSpellingBlanks] = useState<string[]>([]);
+  const [spellingScore, setSpellingScore] = useState(0);
+  const [spellingRound, setSpellingRound] = useState(1);
+  const [spellingCompleted, setSpellingCompleted] = useState(false);
 
   // Game states
   const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
@@ -252,6 +286,329 @@ export default function App() {
     setQuizScore(0);
     setQuizScoreFinished(false);
     setQuizIsConfiguring(false);
+  };
+
+  // Play sound synthesized beep (fully offline, no external SDKs!)
+  const playBeep = (type: "correct" | "wrong" | "pop" | "victory") => {
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === "correct") {
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(600, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(1000, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.15);
+      } else if (type === "pop") {
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(150, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(450, ctx.currentTime + 0.08);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.08);
+      } else if (type === "wrong") {
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(220, ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(120, ctx.currentTime + 0.25);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.25);
+      } else if (type === "victory") {
+        const playTone = (freq: number, start: number, duration: number) => {
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.connect(g);
+          g.connect(ctx.destination);
+          o.type = "sine";
+          o.frequency.setValueAtTime(freq, ctx.currentTime + start);
+          g.gain.setValueAtTime(0.15, ctx.currentTime + start);
+          g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + start + duration);
+          o.start(ctx.currentTime + start);
+          o.stop(ctx.currentTime + start + duration);
+        };
+        playTone(523.25, 0, 0.15); // C5
+        playTone(659.25, 0.12, 0.15); // E5
+        playTone(783.99, 0.24, 0.15); // G5
+        playTone(1046.50, 0.36, 0.3); // C6
+      }
+    } catch (e) {
+      console.warn("Audio Context beep failed", e);
+    }
+  };
+
+  // Fullscreen support toggler
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch((err) => {
+        console.warn("Fullscreen permission denied or blocked:", err);
+      });
+    } else {
+      document.exitFullscreen().catch((err) => {
+        console.warn("Exit fullscreen failed:", err);
+      });
+    }
+  };
+
+  // 1. BALLOON POP ENGINE
+  const startBalloonPop = () => {
+    const allWords = SMILE_UNITS.flatMap(unit => unit.words || []);
+    if (allWords.length < 4) return;
+    
+    // Pick target word
+    const target = allWords[Math.floor(Math.random() * allWords.length)];
+    
+    // Pick 3 distractors
+    const distractors = allWords.filter(w => w.word !== target.word);
+    const shuffledDistractors = [...distractors].sort(() => Math.random() - 0.5).slice(0, 3);
+    
+    // Combine & shuffle options
+    const options = [target, ...shuffledDistractors].sort(() => Math.random() - 0.5);
+    
+    setBalloonTarget(target);
+    setBalloonOptions(options);
+    setBalloonRound(1);
+    setBalloonScore(0);
+    setBalloonCompleted(false);
+    setCurrentGame("balloon");
+  };
+
+  const nextBalloonPopRound = (currentScore: number, roundNum: number) => {
+    if (roundNum >= 5) {
+      setBalloonCompleted(true);
+      playBeep("victory");
+      setPoints(prev => prev + 30);
+      if (!badges.includes("🎈 Balloon Popper")) {
+        setBadges(prev => [...prev, "🎈 Balloon Popper"]);
+      }
+      return;
+    }
+
+    const allWords = SMILE_UNITS.flatMap(unit => unit.words || []);
+    const target = allWords[Math.floor(Math.random() * allWords.length)];
+    const distractors = allWords.filter(w => w.word !== target.word);
+    const shuffledDistractors = [...distractors].sort(() => Math.random() - 0.5).slice(0, 3);
+    const options = [target, ...shuffledDistractors].sort(() => Math.random() - 0.5);
+
+    setBalloonTarget(target);
+    setBalloonOptions(options);
+    setBalloonRound(roundNum + 1);
+  };
+
+  // 2. MEMORY MATCH GAME ENGINE
+  const startMemoryGame = () => {
+    const allWords = SMILE_UNITS.flatMap(unit => unit.words || []);
+    if (allWords.length < 4) return;
+
+    // Pick 4 unique random words
+    const uniqueWords: WordItem[] = [];
+    const pool = [...allWords].sort(() => Math.random() - 0.5);
+    for (const w of pool) {
+      if (!uniqueWords.some(x => x.word === w.word)) {
+        uniqueWords.push(w);
+      }
+      if (uniqueWords.length === 4) break;
+    }
+
+    // Double the items (4 images, 4 words)
+    const cards: Array<{
+      id: string;
+      type: "word" | "image";
+      content: string;
+      word: string;
+      isFlipped: boolean;
+      isMatched: boolean;
+    }> = [];
+
+    uniqueWords.forEach((item, idx) => {
+      // Image card
+      cards.push({
+        id: `img_${idx}_${item.word}`,
+        type: "image",
+        content: item.image || "❓",
+        word: item.word,
+        isFlipped: false,
+        isMatched: false,
+      });
+      // Word card
+      cards.push({
+        id: `txt_${idx}_${item.word}`,
+        type: "word",
+        content: item.word,
+        word: item.word,
+        isFlipped: false,
+        isMatched: false,
+      });
+    });
+
+    // Shuffle cards
+    const shuffledCards = cards.sort(() => Math.random() - 0.5);
+
+    setMemoryCards(shuffledCards);
+    setMemorySelected([]);
+    setMemoryMoves(0);
+    setMemoryCompleted(false);
+    setCurrentGame("memory");
+  };
+
+  const handleCardClick = (idx: number) => {
+    if (memorySelected.length >= 2) return;
+    if (memoryCards[idx].isFlipped || memoryCards[idx].isMatched) return;
+
+    // Flip card
+    playBeep("pop");
+    const updated = [...memoryCards];
+    updated[idx].isFlipped = true;
+    setMemoryCards(updated);
+
+    const newSelected = [...memorySelected, idx];
+    setMemorySelected(newSelected);
+
+    if (newSelected.length === 2) {
+      setMemoryMoves(prev => prev + 1);
+      const [first, second] = newSelected;
+      const card1 = updated[first];
+      const card2 = updated[second];
+
+      if (card1.word === card2.word) {
+        // Matched!
+        setTimeout(() => {
+          const matchedCards = updated.map((card, i) => {
+            if (i === first || i === second) {
+              return { ...card, isMatched: true };
+            }
+            return card;
+          });
+          setMemoryCards(matchedCards);
+          setMemorySelected([]);
+          playBeep("correct");
+          speakText(card1.word);
+
+          // Check if all matched
+          if (matchedCards.every(c => c.isMatched)) {
+            setMemoryCompleted(true);
+            playBeep("victory");
+            setPoints(prev => prev + 40);
+            if (!badges.includes("🧠 Memory Master")) {
+              setBadges(prev => [...prev, "🧠 Memory Master"]);
+            }
+          }
+        }, 600);
+      } else {
+        // Not matched, flip back
+        setTimeout(() => {
+          const flippedBack = updated.map((card, i) => {
+            if (i === first || i === second) {
+              return { ...card, isFlipped: false };
+            }
+            return card;
+          });
+          setMemoryCards(flippedBack);
+          setMemorySelected([]);
+          playBeep("wrong");
+        }, 1200);
+      }
+    }
+  };
+
+  // 3. SPELLING BEE / WORD BUILDER ENGINE
+  const startSpellingGame = () => {
+    const allWords = SMILE_UNITS.flatMap(unit => unit.words || []).filter(w => w.word.length >= 3 && w.word.length <= 8);
+    if (allWords.length === 0) return;
+
+    const target = allWords[Math.floor(Math.random() * allWords.length)];
+    initSpellingRound(target);
+    setSpellingScore(0);
+    setSpellingRound(1);
+    setSpellingCompleted(false);
+    setCurrentGame("spelling");
+  };
+
+  const initSpellingRound = (target: WordItem) => {
+    setSpellingTarget(target);
+    setSpellingBlanks(Array(target.word.length).fill(""));
+
+    // Scramble letters
+    const correctLetters = target.word.toUpperCase().split("");
+    
+    // Add some random distractor letters
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const distractors: string[] = [];
+    while (distractors.length < 3) {
+      const randomChar = alphabet[Math.floor(Math.random() * alphabet.length)];
+      if (!correctLetters.includes(randomChar) && !distractors.includes(randomChar)) {
+        distractors.push(randomChar);
+      }
+    }
+
+    const allLetters = [...correctLetters, ...distractors].sort(() => Math.random() - 0.5);
+    setSpellingLetters(allLetters);
+  };
+
+  const handleSpellingLetterClick = (letter: string) => {
+    playBeep("pop");
+    // Find first empty blank
+    const nextEmptyIdx = spellingBlanks.findIndex(b => b === "");
+    if (nextEmptyIdx !== -1) {
+      const updated = [...spellingBlanks];
+      updated[nextEmptyIdx] = letter;
+      setSpellingBlanks(updated);
+    }
+  };
+
+  const clearSpellingBlanks = () => {
+    playBeep("pop");
+    setSpellingBlanks(Array(spellingTarget?.word.length || 0).fill(""));
+  };
+
+  const verifySpellingWord = () => {
+    if (!spellingTarget) return;
+    const builtWord = spellingBlanks.join("").toUpperCase();
+    const correctWord = spellingTarget.word.toUpperCase();
+
+    if (builtWord === correctWord) {
+      playBeep("correct");
+      speakText(spellingTarget.word);
+      const nextScore = spellingScore + 10;
+      setSpellingScore(nextScore);
+
+      if (spellingRound >= 5) {
+        // Finished spelling game!
+        setSpellingCompleted(true);
+        playBeep("victory");
+        setPoints(prev => prev + 30);
+        if (!badges.includes("✍️ Spelling Bee")) {
+          setBadges(prev => [...prev, "✍️ Spelling Bee"]);
+        }
+      } else {
+        // Go to next round after delay
+        setTimeout(() => {
+          const allWords = SMILE_UNITS.flatMap(unit => unit.words || []).filter(w => w.word.length >= 3 && w.word.length <= 8 && w.word !== spellingTarget.word);
+          const nextTarget = allWords[Math.floor(Math.random() * allWords.length)] || spellingTarget;
+          initSpellingRound(nextTarget);
+          setSpellingRound(prev => prev + 1);
+        }, 1200);
+      }
+    } else {
+      playBeep("wrong");
+      // reset
+      setSpellingBlanks(Array(spellingTarget.word.length).fill(""));
+    }
   };
 
   // Audio state
@@ -578,6 +935,19 @@ export default function App() {
         </div>
 
         <div className="flex gap-3 items-center">
+          {/* Fullscreen Toggle Button */}
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={toggleFullscreen}
+            className="bg-white hover:bg-slate-50 text-sky-850 font-extrabold text-xs py-3 px-4 rounded-[22px] shadow-sm border-b-4 border-slate-200 transition-all flex items-center gap-1.5 cursor-pointer"
+            title="Toggle Fullscreen / ملء الشاشة"
+          >
+            <span className="text-md">{isFullscreen ? "📺" : "🖥️"}</span>
+            <span className="hidden sm:inline font-black uppercase text-[10px] tracking-wider">{isFullscreen ? "Exit" : "Fullscreen"}</span>
+            <span className="text-[10px] text-sky-600 font-black hidden md:inline">ملء الشاشة</span>
+          </motion.button>
+
           <div className="bg-white px-6 py-3 rounded-[24px] shadow-sm border-b-4 border-gray-200 flex items-center gap-2">
             <span className="text-2xl">⭐️</span>
             <span className="text-lg sm:text-xl font-black text-amber-500">{points} Points</span>
@@ -780,7 +1150,9 @@ export default function App() {
             <motion.button
               whileHover={{ scale: 1.05, y: -2 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => setActiveTab("worksheets")}
+              onClick={() => {
+                setActiveTab("worksheets");
+              }}
               className={`flex-1 min-w-[110px] py-4 px-3 rounded-[24px] font-black text-xs uppercase tracking-wider transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${
                 activeTab === "worksheets"
                   ? "bg-violet-500 text-white border-b-4 border-violet-700 shadow-md"
@@ -790,6 +1162,24 @@ export default function App() {
               <FileText className="w-5 h-5 mb-0.5" />
               <span>Worksheets 📝</span>
               <span className="text-[10px] opacity-80 font-bold">أوراق العمل</span>
+            </motion.button>
+
+            <motion.button
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => {
+                setActiveTab("games");
+                setCurrentGame(null);
+              }}
+              className={`flex-1 min-w-[110px] py-4 px-3 rounded-[24px] font-black text-xs uppercase tracking-wider transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${
+                activeTab === "games"
+                  ? "bg-pink-500 text-white border-b-4 border-pink-700 shadow-md"
+                  : "bg-transparent hover:bg-slate-100/85 text-pink-950 font-bold"
+              }`}
+            >
+              <Sparkles className="w-5 h-5 mb-0.5" />
+              <span>Fun Games 🎮</span>
+              <span className="text-[10px] opacity-80 font-bold">Kids Playground</span>
             </motion.button>
           </div>
 
@@ -2337,6 +2727,376 @@ export default function App() {
                           </motion.div>
                         )}
                       </div>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+
+              {activeTab === "games" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="flex flex-col gap-6"
+                >
+                  {/* Games Header */}
+                  <div className="bg-gradient-to-r from-pink-500 to-rose-500 text-white p-6 rounded-[32px] border-b-6 border-r-6 border-rose-700 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                      <h3 className="text-xl sm:text-2xl font-black flex items-center gap-2 uppercase tracking-wide">
+                        🎮 Fun Educational Games
+                      </h3>
+                      <p className="text-xs text-rose-100 font-bold mt-1">
+                        Fun interactive games for 8-year-old kids to learn and spell vocabulary from Grade 3 English syllabus!
+                      </p>
+                    </div>
+                    <div className="bg-white/20 border border-white/30 text-white text-[10px] font-black px-3 py-1.5 rounded-full flex items-center gap-1 uppercase">
+                      <span>🎯 Learn & Play</span>
+                    </div>
+                  </div>
+
+                  {currentGame === null ? (
+                    /* GAME SELECTOR SCREEN */
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-2">
+                      {/* 1. Balloon Pop */}
+                      <motion.div
+                        whileHover={{ scale: 1.03, y: -4 }}
+                        className="bg-rose-50/50 hover:bg-rose-50 border-4 border-rose-200 p-6 rounded-[32px] border-b-8 flex flex-col gap-4 text-center items-center cursor-pointer transition-all"
+                        onClick={startBalloonPop}
+                      >
+                        <span className="text-5xl animate-bounce">🎈</span>
+                        <h4 className="text-lg font-black text-rose-950 uppercase">Balloon Pop</h4>
+                        <p className="text-xs text-rose-800 font-semibold leading-relaxed">
+                          Pop the balloon that matches the picture! Perfect for matching words with pictures.
+                        </p>
+                        <button className="mt-2 w-full py-3 bg-rose-500 hover:bg-rose-600 text-white font-black uppercase text-xs rounded-2xl border-b-4 border-rose-700 transition-all cursor-pointer">
+                          Play Game! 🎮
+                        </button>
+                      </motion.div>
+
+                      {/* 2. Memory Match */}
+                      <motion.div
+                        whileHover={{ scale: 1.03, y: -4 }}
+                        className="bg-amber-50/50 hover:bg-amber-50 border-4 border-amber-200 p-6 rounded-[32px] border-b-8 flex flex-col gap-4 text-center items-center cursor-pointer transition-all"
+                        onClick={startMemoryGame}
+                      >
+                        <span className="text-5xl">🧠</span>
+                        <h4 className="text-lg font-black text-amber-950 uppercase">Memory Cards</h4>
+                        <p className="text-xs text-amber-800 font-semibold leading-relaxed">
+                          Find pairs by matching word cards to their correct picture cards!
+                        </p>
+                        <button className="mt-2 w-full py-3 bg-amber-400 hover:bg-amber-500 text-white font-black uppercase text-xs rounded-2xl border-b-4 border-amber-600 transition-all cursor-pointer">
+                          Play Game! 🎮
+                        </button>
+                      </motion.div>
+
+                      {/* 3. Spelling Bee */}
+                      <motion.div
+                        whileHover={{ scale: 1.03, y: -4 }}
+                        className="bg-emerald-50/50 hover:bg-emerald-50 border-4 border-emerald-200 p-6 rounded-[32px] border-b-8 flex flex-col gap-4 text-center items-center cursor-pointer transition-all"
+                        onClick={startSpellingGame}
+                      >
+                        <span className="text-5xl">🐝</span>
+                        <h4 className="text-lg font-black text-emerald-950 uppercase">Spelling Bee</h4>
+                        <p className="text-xs text-emerald-800 font-semibold leading-relaxed">
+                          Spelling is fun! Fill in the blanks with the correct letter bubbles to write the word.
+                        </p>
+                        <button className="mt-2 w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-black uppercase text-xs rounded-2xl border-b-4 border-emerald-700 transition-all cursor-pointer">
+                          Play Game! 🎮
+                        </button>
+                      </motion.div>
+                    </div>
+                  ) : (
+                    /* ACTIVE GAME WORKSPACE */
+                    <div className="bg-white border-4 border-slate-200 rounded-[32px] p-5 sm:p-8 relative flex flex-col gap-6">
+                      {/* Back button to list */}
+                      <button
+                        onClick={() => setCurrentGame(null)}
+                        className="absolute left-4 top-4 bg-slate-100 hover:bg-slate-200 text-slate-800 font-black text-xs uppercase px-4 py-2 rounded-xl transition-all cursor-pointer z-20 flex items-center gap-1"
+                      >
+                        <span>◀ Back</span>
+                      </button>
+
+                      {/* GAME 1: BALLOON POP */}
+                      {currentGame === "balloon" && balloonTarget && (
+                        <div className="flex flex-col gap-6 items-center text-center py-4">
+                          <div className="flex justify-between w-full border-b border-slate-100 pb-3 mb-2 text-slate-500 font-extrabold text-xs">
+                            <span>BALLOON POP</span>
+                            <span className="text-rose-600">Round {balloonRound} of 5</span>
+                          </div>
+
+                          {!balloonCompleted ? (
+                            <>
+                              <div className="flex flex-col items-center gap-2">
+                                <span className="text-xs font-black text-rose-500 uppercase tracking-widest">Find the correct word for:</span>
+                                <div className="w-24 h-24 sm:w-32 sm:h-32 bg-rose-50 rounded-full border-4 border-rose-200 flex items-center justify-center text-5xl sm:text-7xl shadow-inner relative animate-pulse">
+                                  {balloonTarget.image}
+                                </div>
+                                <h4 className="text-lg font-black text-slate-700 mt-2">What is this?</h4>
+                                
+                                {/* Read Aloud Question Button */}
+                                <motion.button
+                                  whileHover={{ scale: 1.05 }}
+                                  whileTap={{ scale: 0.95 }}
+                                  onClick={() => speakText("What is this? Find the correct word for this picture.")}
+                                  className="mt-1 px-4 py-2 bg-rose-100 hover:bg-rose-200 text-rose-700 font-black text-xs rounded-full flex items-center gap-1.5 transition-all cursor-pointer"
+                                  title="Listen to the question"
+                                >
+                                  <Volume2 className="w-4 h-4" />
+                                  <span>Listen to Question</span>
+                                </motion.button>
+                              </div>
+
+                              {/* Balloons container */}
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 w-full max-w-2xl mt-6">
+                                {balloonOptions.map((opt, index) => {
+                                  const colors = [
+                                    "from-rose-400 to-rose-500 border-rose-600 shadow-rose-200/50",
+                                    "from-sky-400 to-sky-500 border-sky-600 shadow-sky-200/50",
+                                    "from-emerald-400 to-emerald-500 border-emerald-600 shadow-emerald-200/50",
+                                    "from-amber-400 to-amber-500 border-amber-600 shadow-amber-200/50"
+                                  ];
+                                  const balloonColor = colors[index % colors.length];
+
+                                  return (
+                                    <motion.div
+                                      key={index}
+                                      whileHover={{ scale: 1.08, y: -10 }}
+                                      whileTap={{ scale: 0.9 }}
+                                      onClick={() => {
+                                        if (opt.word === balloonTarget.word) {
+                                          playBeep("pop");
+                                          setPoints(prev => prev + 5);
+                                          // Go to next round
+                                          nextBalloonPopRound(balloonScore + 1, balloonRound);
+                                        } else {
+                                          playBeep("wrong");
+                                        }
+                                      }}
+                                      className={`relative bg-gradient-to-b ${balloonColor} text-white border-2 border-b-6 rounded-full w-24 h-32 sm:w-28 sm:h-36 flex flex-col items-center justify-center cursor-pointer shadow-lg mx-auto`}
+                                    >
+                                      {/* Word label inside balloon */}
+                                      <span className="text-sm font-black uppercase tracking-wider text-center px-2 truncate w-full drop-shadow-sm select-none">
+                                        {opt.word}
+                                      </span>
+
+                                      {/* Balloon knot and thread */}
+                                      <div className="absolute -bottom-1 w-2.5 h-1.5 bg-current opacity-80 rounded-sm"></div>
+                                      <div className="absolute -bottom-10 w-0.5 h-10 bg-slate-300"></div>
+                                    </motion.div>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          ) : (
+                            /* Victory view */
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.9 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              className="flex flex-col items-center gap-4 py-6"
+                            >
+                              <span className="text-7xl">🎈🎉🏆</span>
+                              <h3 className="text-2xl font-black text-emerald-600 uppercase">You are a Balloon Master!</h3>
+                              <p className="text-sm text-slate-500 font-extrabold">Super! You popped all correct balloons successfully!</p>
+                              <p className="text-md font-bold text-amber-500 bg-amber-50 px-5 py-2 rounded-full border border-amber-100">+30 Points Received! ⭐️</p>
+                              
+                              <button
+                                onClick={startBalloonPop}
+                                className="mt-4 px-8 py-3.5 bg-rose-500 hover:bg-rose-600 text-white font-black uppercase text-xs rounded-2xl border-b-4 border-rose-700 transition-all cursor-pointer flex items-center gap-2"
+                              >
+                                <RotateCcw className="w-4 h-4" />
+                                <span>Play Again</span>
+                              </button>
+                            </motion.div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* GAME 2: MEMORY CARDS */}
+                      {currentGame === "memory" && (
+                        <div className="flex flex-col gap-6 items-center py-4 w-full">
+                          <div className="flex justify-between w-full border-b border-slate-100 pb-3 mb-2 text-slate-500 font-extrabold text-xs">
+                            <span>MEMORY MATCH</span>
+                            <span>Moves: <span className="text-amber-500 font-black">{memoryMoves}</span></span>
+                          </div>
+
+                          {!memoryCompleted ? (
+                            <>
+                              {/* Read Aloud Instructions Button */}
+                              <motion.button
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
+                                onClick={() => speakText("Match the word cards with their correct picture cards!")}
+                                className="mb-2 px-4 py-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-black text-xs rounded-full flex items-center gap-1.5 transition-all cursor-pointer"
+                                title="Listen to instructions"
+                              >
+                                <Volume2 className="w-4 h-4" />
+                                <span>Listen to Instructions</span>
+                              </motion.button>
+
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 w-full max-w-xl">
+                                {memoryCards.map((card, idx) => {
+                                  const isOpen = card.isFlipped || card.isMatched;
+                                  return (
+                                    <motion.div
+                                      key={card.id}
+                                      whileHover={!isOpen ? { scale: 1.05 } : {}}
+                                      whileTap={!isOpen ? { scale: 0.95 } : {}}
+                                      onClick={() => handleCardClick(idx)}
+                                      className={`h-28 sm:h-32 rounded-2xl border-2 transition-all flex items-center justify-center cursor-pointer select-none relative ${
+                                        card.isMatched
+                                          ? "bg-emerald-500 border-emerald-600 text-white shadow-inner"
+                                          : card.isFlipped
+                                          ? "bg-amber-100 border-amber-300 text-slate-800 shadow-md"
+                                          : "bg-gradient-to-br from-indigo-500 to-indigo-600 border-indigo-700 text-white shadow-lg"
+                                      }`}
+                                    >
+                                      {isOpen ? (
+                                        card.type === "image" ? (
+                                          <span className="text-4xl sm:text-5xl">{card.content}</span>
+                                        ) : (
+                                          <span className="text-xs sm:text-sm font-black uppercase text-slate-800 text-center px-1 break-all">
+                                            {card.content}
+                                          </span>
+                                        )
+                                      ) : (
+                                        <div className="flex flex-col items-center">
+                                          <span className="text-2xl sm:text-3xl">⭐️</span>
+                                          <span className="text-[9px] font-black tracking-wider uppercase opacity-80 mt-1">SMILE</span>
+                                        </div>
+                                      )}
+                                    </motion.div>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          ) : (
+                            /* Victory memory view */
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.9 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              className="flex flex-col items-center gap-4 py-6 text-center"
+                            >
+                              <span className="text-7xl">🧠🌟🏆</span>
+                              <h3 className="text-2xl font-black text-amber-500 uppercase">Excellent Memory!</h3>
+                              <p className="text-sm text-slate-500 font-extrabold">You found all matching memory cards in {memoryMoves} moves!</p>
+                              <p className="text-md font-bold text-amber-500 bg-amber-50 px-5 py-2 rounded-full border border-amber-100">+40 Points Received! ⭐️</p>
+
+                              <button
+                                onClick={startMemoryGame}
+                                className="mt-4 px-8 py-3.5 bg-amber-500 hover:bg-amber-600 text-white font-black uppercase text-xs rounded-2xl border-b-4 border-amber-700 transition-all cursor-pointer flex items-center gap-2"
+                              >
+                                <RotateCcw className="w-4 h-4" />
+                                <span>Play Again</span>
+                              </button>
+                            </motion.div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* GAME 3: SPELLING BEE */}
+                      {currentGame === "spelling" && spellingTarget && (
+                        <div className="flex flex-col gap-6 items-center py-4 w-full">
+                          <div className="flex justify-between w-full border-b border-slate-100 pb-3 mb-2 text-slate-500 font-extrabold text-xs">
+                            <span>SPELLING BEE</span>
+                            <span className="text-emerald-600">Round {spellingRound} of 5</span>
+                          </div>
+
+                          {!spellingCompleted ? (
+                            <div className="flex flex-col items-center gap-5 w-full">
+                              {/* Display image target */}
+                              <div className="w-24 h-24 sm:w-32 sm:h-32 bg-emerald-50 rounded-full border-4 border-emerald-200 flex items-center justify-center text-5xl sm:text-7xl shadow-inner animate-pulse">
+                                {spellingTarget.image}
+                              </div>
+
+                              {/* Read Aloud Word Button */}
+                              <motion.button
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
+                                onClick={() => speakText("Spell the word: " + spellingTarget.word)}
+                                className="px-4 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 font-black text-xs rounded-full flex items-center gap-1.5 transition-all cursor-pointer"
+                                title="Listen to the word to spell"
+                              >
+                                <Volume2 className="w-4 h-4" />
+                                <span>Listen to Word</span>
+                              </motion.button>
+
+                              <p className="text-xs font-black text-slate-400 uppercase tracking-widest mt-1">Tap the letters to build the word:</p>
+
+                              {/* Blank letters slots */}
+                              <div className="flex gap-2 sm:gap-3 flex-wrap justify-center mt-2">
+                                {spellingBlanks.map((char, index) => (
+                                  <div
+                                    key={index}
+                                    className={`w-10 h-12 sm:w-12 sm:h-14 border-b-4 rounded-xl flex items-center justify-center text-md sm:text-xl font-black uppercase transition-all shadow-sm ${
+                                      char !== "" 
+                                        ? "bg-slate-50 border-emerald-500 text-slate-800" 
+                                        : "bg-slate-100 border-slate-300 text-transparent"
+                                    }`}
+                                  >
+                                    {char}
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Letter choices bubbles */}
+                              <div className="flex gap-2.5 flex-wrap justify-center max-w-md mt-6">
+                                {spellingLetters.map((char, index) => (
+                                  <motion.button
+                                    key={index}
+                                    whileHover={{ scale: 1.1, y: -2 }}
+                                    whileTap={{ scale: 0.9 }}
+                                    onClick={() => handleSpellingLetterClick(char)}
+                                    className="w-11 h-11 sm:w-13 sm:h-13 bg-white border-2 border-slate-200 hover:border-emerald-300 text-slate-700 hover:text-emerald-600 font-black text-sm sm:text-md uppercase rounded-full shadow-sm cursor-pointer flex items-center justify-center transition-all"
+                                  >
+                                    {char}
+                                  </motion.button>
+                                ))}
+                              </div>
+
+                              {/* Actions Bar */}
+                              <div className="flex gap-3 mt-6">
+                                <button
+                                  onClick={clearSpellingBlanks}
+                                  className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs uppercase rounded-xl transition-all cursor-pointer"
+                                >
+                                  Clear ❌
+                                </button>
+                                <button
+                                  onClick={verifySpellingWord}
+                                  disabled={spellingBlanks.includes("")}
+                                  className={`px-8 py-2.5 font-black text-xs uppercase rounded-xl border-b-4 transition-all flex items-center gap-1 ${
+                                    !spellingBlanks.includes("")
+                                      ? "bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-700 cursor-pointer"
+                                      : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                                  }`}
+                                >
+                                  Check ✔
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Victory spelling view */
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.9 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              className="flex flex-col items-center gap-4 py-6 text-center"
+                            >
+                              <span className="text-7xl">🐝🌟🏆</span>
+                              <h3 className="text-2xl font-black text-emerald-600 uppercase">Spelling Champion!</h3>
+                              <p className="text-sm text-slate-500 font-extrabold">Awesome! You spelled and built the words correctly!</p>
+                              <p className="text-md font-bold text-amber-500 bg-amber-50 px-5 py-2 rounded-full border border-amber-100">+30 Points Received! ⭐️</p>
+
+                              <button
+                                onClick={startSpellingGame}
+                                className="mt-4 px-8 py-3.5 bg-emerald-500 hover:bg-emerald-600 text-white font-black uppercase text-xs rounded-2xl border-b-4 border-emerald-700 transition-all cursor-pointer flex items-center gap-2"
+                              >
+                                <RotateCcw className="w-4 h-4" />
+                                <span>Play Again</span>
+                              </button>
+                            </motion.div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </motion.div>
