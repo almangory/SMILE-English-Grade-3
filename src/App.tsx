@@ -24,17 +24,22 @@ import {
   Play,
   Square,
   Eye,
-  EyeOff
+  EyeOff,
+  FileText,
+  Lock,
+  Unlock,
+  Printer
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { SMILE_UNITS } from "./smileData";
 import { UnitItem, Lesson, WordItem, ChatMessage } from "./types";
 import { generateQuiz } from "./quizGenerator";
+import { WORKSHEETS } from "./worksheetsData";
 
 export default function App() {
   const [selectedUnit, setSelectedUnit] = useState<UnitItem>(SMILE_UNITS[0]);
   const [selectedLesson, setSelectedLesson] = useState<Lesson>(SMILE_UNITS[0].lessons[0]);
-  const [activeTab, setActiveTab] = useState<"book" | "dictionary" | "quiz" | "adventure" | "syllabus">("book");
+  const [activeTab, setActiveTab] = useState<"book" | "dictionary" | "quiz" | "adventure" | "syllabus" | "worksheets">("book");
   
   // Voice selection mode (Vibrant server-side AI Voice with zero-config HTML5 audio fallbacks)
   const [voiceMode, setVoiceMode] = useState<"system" | "gemini">("gemini");
@@ -46,6 +51,18 @@ export default function App() {
   const [quizFinished, setQuizScoreFinished] = useState(false);
   const [points, setPoints] = useState(10);
   const [badges, setBadges] = useState<string[]>(["⭐️ First Explorer"]);
+
+  // Worksheets states
+  const [watermarkUnlocked, setWatermarkUnlocked] = useState<boolean>(false);
+  const [watermarkCodeInput, setWatermarkCodeInput] = useState<string>("");
+  const [selectedWorksheetId, setSelectedWorksheetId] = useState<number>(1);
+  const [worksheetStudentAnswers, setWorksheetStudentAnswers] = useState<Record<string, string>>({});
+  const [worksheetSubmitted, setWorksheetSubmitted] = useState<boolean>(false);
+  const [worksheetScore, setWorksheetScore] = useState<number>(0);
+  const [studentName, setStudentName] = useState<string>("");
+  const [studentClass, setStudentClass] = useState<string>("");
+  const [studentSchool, setStudentSchool] = useState<string>("");
+  const [watermarkMsg, setWatermarkMsg] = useState<string>("");
 
   // Custom configurable exam state
   const [quizScope, setQuizScope] = useState<"all" | "unit" | "lesson">("unit");
@@ -603,6 +620,21 @@ export default function App() {
               <span>Syllabus Map</span>
               <span className="text-[10px] opacity-80 font-bold">Book Outline</span>
             </motion.button>
+
+            <motion.button
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setActiveTab("worksheets")}
+              className={`flex-1 min-w-[110px] py-4 px-3 rounded-[24px] font-black text-xs uppercase tracking-wider transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${
+                activeTab === "worksheets"
+                  ? "bg-violet-500 text-white border-b-4 border-violet-700 shadow-md"
+                  : "bg-transparent hover:bg-slate-100/85 text-violet-950 font-bold"
+              }`}
+            >
+              <FileText className="w-5 h-5 mb-0.5" />
+              <span>Worksheets 📝</span>
+              <span className="text-[10px] opacity-80 font-bold">أوراق العمل</span>
+            </motion.button>
           </div>
 
           {/* ACTIVE CONTENT WORKSPACE AREA WITH BENTO STYLING AND GRAPHICS */}
@@ -1094,10 +1126,17 @@ export default function App() {
                             <span className="text-amber-500 font-extrabold">Correct: {quizScore}</span>
                           </div>
 
-                          <div className="py-2">
+                          <div className="py-2 flex flex-col items-center gap-2">
                             <p className="text-lg sm:text-xl font-black text-slate-800 text-center leading-relaxed">
                               {currentQuestion.question}
                             </p>
+                            <button
+                              onClick={() => speakText(currentQuestion.question)}
+                              className="p-2 rounded-full bg-indigo-50 hover:bg-indigo-100 text-indigo-600 transition-colors cursor-pointer flex items-center justify-center"
+                              title="Listen to question"
+                            >
+                              <Volume2 className="w-5 h-5 animate-pulse" />
+                            </button>
                           </div>
 
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1">
@@ -1123,11 +1162,23 @@ export default function App() {
                                   whileHover={{ scale: selectedAnswer ? 1 : 1.03 }}
                                   whileTap={{ scale: selectedAnswer ? 1 : 0.97 }}
                                   onClick={() => handleQuizAnswerSubmit(option, currentQuizIndex, quizActiveQuestions.length, quizActiveQuestions)}
-                                  className={`py-4 px-5 rounded-[20px] text-center font-black text-[14px] transition-all cursor-pointer flex items-center justify-between uppercase tracking-wide ${buttonStyle}`}
+                                  className={`py-4 px-5 rounded-[20px] text-center font-black text-[14px] transition-all cursor-pointer flex items-center justify-between uppercase tracking-wide relative group ${buttonStyle}`}
                                 >
-                                  <span>{option}</span>
-                                  {selectedAnswer && isCorrect && <Check className="w-5 h-5 text-white" />}
-                                  {selectedAnswer && isSelected && !isCorrect && <span className="text-white text-xs font-black font-mono">X</span>}
+                                  <span className="flex-1 text-left truncate pr-8">{option}</span>
+                                  <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        speakText(option);
+                                      }}
+                                      className="p-1.5 rounded-full hover:bg-black/5 text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer"
+                                      title="Listen"
+                                    >
+                                      <Volume2 className="w-4 h-4" />
+                                    </button>
+                                    {selectedAnswer && isCorrect && <Check className="w-5 h-5 text-white" />}
+                                    {selectedAnswer && isSelected && !isCorrect && <span className="text-white text-xs font-black font-mono">X</span>}
+                                  </div>
                                 </motion.button>
                               );
                             })}
@@ -1582,6 +1633,356 @@ export default function App() {
                         </button>
                       </motion.div>
                     ))}
+                  </div>
+                </motion.div>
+              )}
+
+              {/* TAB 6: WORKSHEETS (أوراق العمل) */}
+              {activeTab === "worksheets" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="flex flex-col gap-6"
+                >
+                  <div className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white p-6 rounded-[32px] border-b-6 border-r-6 border-violet-800/80 no-print">
+                    <h3 className="text-xl font-black flex items-center gap-2 uppercase tracking-wide">
+                      📝 Interactive & Printable Worksheets • أوراق عمل تفاعلية
+                    </h3>
+                    <p className="text-xs text-violet-100 font-bold mt-1">
+                      Solve worksheets interactively with auto-correction, listen to pronunications, or print clean sheets with watermarks!
+                    </p>
+                  </div>
+
+                  {/* Worksheet list switcher */}
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 no-print">
+                    {WORKSHEETS.map((ws) => {
+                      const isSelected = selectedWorksheetId === ws.id;
+                      return (
+                        <motion.button
+                          key={ws.id}
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => {
+                            setSelectedWorksheetId(ws.id);
+                            setWorksheetStudentAnswers({});
+                            setWorksheetSubmitted(false);
+                            setWorksheetScore(0);
+                          }}
+                          className={`p-3.5 rounded-[22px] border-b-4 border-r-4 text-center cursor-pointer transition-all flex flex-col gap-1 ${
+                            isSelected
+                              ? "bg-violet-600 text-white border-violet-800 shadow-md"
+                              : "bg-white border-slate-200 hover:bg-slate-50 text-slate-700"
+                          }`}
+                        >
+                          <span className="text-[10px] font-extrabold uppercase opacity-85">Sheet {ws.id}</span>
+                          <span className="text-xs font-black truncate w-full">{ws.title}</span>
+                          <span className="text-[9px] font-semibold opacity-75">{ws.arabicTitle}</span>
+                        </motion.button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Teacher Tools Lock control */}
+                  <div className="bg-violet-50 border-2 border-dashed border-violet-200 p-5 rounded-[28px] flex flex-col md:flex-row justify-between items-center gap-4 no-print">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-white rounded-full text-2xl shadow-sm">
+                        {watermarkUnlocked ? "🔓" : "🔒"}
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-black text-violet-950 uppercase">Teacher Print Setup • أوراق العمل والطباعة</h4>
+                        <p className="text-[11px] font-semibold text-slate-500 mt-0.5">
+                          {watermarkUnlocked 
+                            ? "Excellent! The watermark is removed. Ready for clean printing! 🖨️"
+                            : "To remove the watermark for clean printable paper distribution, enter the teacher code: 20302060"}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {!watermarkUnlocked ? (
+                      <div className="flex gap-2 w-full md:w-auto shrink-0">
+                        <input
+                          type="text"
+                          value={watermarkCodeInput}
+                          onChange={(e) => {
+                            setWatermarkCodeInput(e.target.value);
+                            setWatermarkMsg("");
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              if (watermarkCodeInput.trim() === "20302060") {
+                                setWatermarkUnlocked(true);
+                                setWatermarkMsg("Success! Watermark unlocked.");
+                              } else {
+                                setWatermarkMsg("Incorrect code. Please try again!");
+                              }
+                            }
+                          }}
+                          placeholder="Enter code (20302060)"
+                          className="px-4 py-2.5 rounded-xl border-2 border-slate-200 bg-white text-xs font-extrabold text-sky-950 w-full md:w-48 focus:outline-none focus:border-violet-500"
+                        />
+                        <button
+                          onClick={() => {
+                            if (watermarkCodeInput.trim() === "20302060") {
+                              setWatermarkUnlocked(true);
+                              setWatermarkMsg("Success! Watermark unlocked.");
+                            } else {
+                              setWatermarkMsg("Incorrect code. Please try again!");
+                            }
+                          }}
+                          className="bg-violet-600 hover:bg-violet-700 text-white text-xs font-black uppercase py-2.5 px-5 rounded-xl border-b-4 border-violet-800 tracking-wide transition-all shrink-0 cursor-pointer"
+                        >
+                          Unlock 🔓
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setWatermarkUnlocked(false);
+                          setWatermarkCodeInput("");
+                          setWatermarkMsg("");
+                        }}
+                        className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-black uppercase py-2 px-4 rounded-xl border-b-4 border-slate-400 transition-all cursor-pointer"
+                      >
+                        Lock Again 🔒
+                      </button>
+                    )}
+                  </div>
+
+                  {watermarkMsg && (
+                    <p className={`text-xs font-bold text-center -mt-2 no-print ${watermarkUnlocked ? "text-emerald-600" : "text-rose-500"}`}>
+                      {watermarkMsg}
+                    </p>
+                  )}
+
+                  {/* Selected Worksheet Container */}
+                  <div className="printable-worksheet bg-white border-b-8 border-r-8 border-slate-200 rounded-[36px] p-6 sm:p-10 relative overflow-hidden flex flex-col gap-6 shadow-sm">
+                    {/* Watermark overlay */}
+                    {!watermarkUnlocked && (
+                      <div className="absolute inset-0 pointer-events-none select-none opacity-[0.06] overflow-hidden z-0 flex flex-col justify-around items-center">
+                        <div className="text-3xl sm:text-5xl font-black uppercase rotate-[-25deg] whitespace-nowrap">بوابة المعلم السوداني - SMILE GRADE 3</div>
+                        <div className="text-3xl sm:text-5xl font-black uppercase rotate-[-25deg] whitespace-nowrap">بوابة المعلم السوداني - SMILE GRADE 3</div>
+                        <div className="text-3xl sm:text-5xl font-black uppercase rotate-[-25deg] whitespace-nowrap">بوابة المعلم السوداني - SMILE GRADE 3</div>
+                        <div className="text-3xl sm:text-5xl font-black uppercase rotate-[-25deg] whitespace-nowrap">بوابة المعلم السوداني - SMILE GRADE 3</div>
+                      </div>
+                    )}
+
+                    {/* Sudan Ministry layout header */}
+                    <div className="border-b-4 border-double border-slate-300 pb-4 flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-4 z-10">
+                      <div className="text-[10px] font-black text-slate-700 uppercase tracking-wide flex flex-col gap-1">
+                        <span>جمهورية السودان • Republic of Sudan</span>
+                        <span>وزارة التربية والتعليم • Ministry of Education</span>
+                        <span>ولاية الخرطوم • Khartoum State</span>
+                      </div>
+                      <div className="flex flex-col items-center">
+                        <span className="text-3xl">🇸🇩</span>
+                        <span className="text-md font-black text-slate-800 uppercase tracking-tight mt-1">SMILE Book 1</span>
+                      </div>
+                      <div className="text-[10px] font-black text-slate-700 uppercase tracking-wide text-center sm:text-right flex flex-col gap-1">
+                        <span>Grade 3 Worksheet • ورقة عمل الصف الثالث</span>
+                        <span>English Language • اللغة الإنجليزية</span>
+                        <span>Total Marks: 20 • الدرجة الكاملة: 20</span>
+                      </div>
+                    </div>
+
+                    {/* Input forms for Student Name, Class, School */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200/50 z-10 no-print">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-black text-slate-500 uppercase">Student Name / اسم الطالب:</label>
+                        <input
+                          type="text"
+                          value={studentName}
+                          onChange={(e) => setStudentName(e.target.value)}
+                          placeholder="أدخل اسمك هنا..."
+                          className="w-full px-3 py-2 rounded-xl bg-white border-2 border-slate-200 font-extrabold text-xs text-sky-950 focus:outline-none focus:border-violet-500"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-black text-slate-500 uppercase">Class / الصف:</label>
+                        <input
+                          type="text"
+                          value={studentClass}
+                          onChange={(e) => setStudentClass(e.target.value)}
+                          placeholder="أدخل الصف (مثلاً: الثالث أ)..."
+                          className="w-full px-3 py-2 rounded-xl bg-white border-2 border-slate-200 font-extrabold text-xs text-sky-950 focus:outline-none focus:border-violet-500"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-black text-slate-500 uppercase">School / المدرسة:</label>
+                        <input
+                          type="text"
+                          value={studentSchool}
+                          onChange={(e) => setStudentSchool(e.target.value)}
+                          placeholder="اسم المدرسة..."
+                          className="w-full px-3 py-2 rounded-xl bg-white border-2 border-slate-200 font-extrabold text-xs text-sky-950 focus:outline-none focus:border-violet-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Print-only metadata display */}
+                    <div className="hidden print:grid grid-cols-3 gap-6 border-b-2 border-slate-200 pb-3 z-10 text-xs">
+                      <span className="font-black text-slate-700">Student Name: <span className="border-b border-dashed border-slate-900 px-2 font-bold">{studentName || "___________________"}</span></span>
+                      <span className="font-black text-slate-700">Class: <span className="border-b border-dashed border-slate-900 px-2 font-bold">{studentClass || "__________"}</span></span>
+                      <span className="font-black text-slate-700">School: <span className="border-b border-dashed border-slate-900 px-2 font-bold">{studentSchool || "_________________"}</span></span>
+                    </div>
+
+                    {/* Questions */}
+                    <div className="flex flex-col gap-6 mt-2">
+                      {(WORKSHEETS.find(ws => ws.id === selectedWorksheetId) || WORKSHEETS[0]).questions.map((q, idx) => {
+                        const selectedOpt = worksheetStudentAnswers[q.id];
+                        const isCorrect = selectedOpt === q.correctAnswer;
+                        return (
+                          <div key={q.id} className="border-b border-slate-100 pb-5 last:border-0 z-10 flex flex-col gap-3 relative">
+                            <div className="flex items-start gap-2.5">
+                              <span className="bg-violet-50 text-violet-700 text-xs font-black px-2.5 py-1 rounded-lg">Q{idx + 1}</span>
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2">
+                                  <p className="text-[15px] font-black text-slate-800 leading-snug">{q.question}</p>
+                                  <button
+                                    onClick={() => speakText(q.question)}
+                                    className="p-1 rounded-full hover:bg-slate-100 text-indigo-500 hover:text-indigo-600 transition-colors cursor-pointer shrink-0 no-print"
+                                    title="Listen to question"
+                                  >
+                                    <Volume2 className="w-4 h-4 animate-bounce" />
+                                  </button>
+                                </div>
+                                {q.arabicTranslation && (
+                                  <p className="text-xs font-bold text-slate-400 mt-0.5 leading-snug">{q.arabicTranslation}</p>
+                                )}
+                              </div>
+                              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider shrink-0">[{q.marks} Marks]</span>
+                            </div>
+
+                            {/* Options grid */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-1">
+                              {q.options.map((opt) => {
+                                const isOptSelected = selectedOpt === opt;
+                                const isOptCorrect = opt === q.correctAnswer;
+
+                                let optStyle = "bg-white border-slate-200 hover:bg-slate-50 text-slate-700";
+                                if (worksheetSubmitted) {
+                                  if (isOptCorrect) {
+                                    optStyle = "bg-emerald-500 border-emerald-700 text-white font-black shadow-sm";
+                                  } else if (isOptSelected) {
+                                    optStyle = "bg-rose-500 border-rose-700 text-white font-black shadow-sm";
+                                  } else {
+                                    optStyle = "opacity-60 bg-slate-50 border-slate-200 text-slate-400";
+                                  }
+                                } else {
+                                  if (isOptSelected) {
+                                    optStyle = "bg-violet-500 border-violet-700 text-white font-black shadow-md scale-[1.01]";
+                                  }
+                                }
+
+                                return (
+                                  <div key={opt} className="relative flex items-center w-full">
+                                    <button
+                                      disabled={worksheetSubmitted}
+                                      onClick={() => {
+                                        setWorksheetStudentAnswers(prev => ({
+                                          ...prev,
+                                          [q.id]: opt
+                                        }));
+                                      }}
+                                      className={`w-full py-3.5 pl-4 pr-12 rounded-xl border-2 text-left font-black text-xs uppercase tracking-wide transition-all cursor-pointer flex items-center justify-between ${optStyle}`}
+                                    >
+                                      <span className="flex-1 truncate">{opt}</span>
+                                      {worksheetSubmitted && isOptCorrect && <Check className="w-4 h-4 text-white ml-2" />}
+                                      {worksheetSubmitted && isOptSelected && !isOptCorrect && <span className="text-white text-[10px] font-black ml-2 font-mono">X</span>}
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        speakText(opt);
+                                      }}
+                                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-full hover:bg-black/5 text-slate-400 hover:text-indigo-600 transition-all cursor-pointer z-20 no-print"
+                                      title="Listen to Option"
+                                    >
+                                      <Volume2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Submit, feedback & reset buttons */}
+                    <div className="mt-4 border-t border-slate-100 pt-6 flex flex-col sm:flex-row gap-3 justify-between items-center z-10 no-print">
+                      {!worksheetSubmitted ? (
+                        <button
+                          onClick={() => {
+                            const ws = WORKSHEETS.find(w => w.id === selectedWorksheetId) || WORKSHEETS[0];
+                            let score = 0;
+                            ws.questions.forEach(q => {
+                              if (worksheetStudentAnswers[q.id] === q.correctAnswer) {
+                                score += q.marks;
+                              }
+                            });
+                            setWorksheetScore(score);
+                            setWorksheetSubmitted(true);
+                            setPoints(prev => prev + 30);
+                            
+                            if (score === 20) {
+                              if (!badges.includes("🏆 Worksheet Master")) {
+                                setBadges(prev => [...prev, "🏆 Worksheet Master"]);
+                              }
+                            }
+                          }}
+                          disabled={Object.keys(worksheetStudentAnswers).length === 0}
+                          className={`px-8 py-4 rounded-[20px] font-black uppercase text-xs tracking-wider transition-all shadow-md flex items-center gap-2 border-b-4 ${
+                            Object.keys(worksheetStudentAnswers).length > 0
+                              ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-800 cursor-pointer"
+                              : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60"
+                          }`}
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>Correct Worksheet • تصحيح ورقة العمل</span>
+                        </button>
+                      ) : (
+                        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                          <button
+                            onClick={() => {
+                              setWorksheetStudentAnswers({});
+                              setWorksheetSubmitted(false);
+                              setWorksheetScore(0);
+                            }}
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase text-xs py-3.5 px-6 rounded-[20px] border-b-4 border-indigo-800 transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm"
+                          >
+                            <RotateCcw className="w-4 h-4" />
+                            <span>Solve Again • حل مرة أخرى</span>
+                          </button>
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => window.print()}
+                        className="bg-slate-900 hover:bg-slate-800 text-white font-black uppercase text-xs py-3.5 px-6 rounded-[20px] border-b-4 border-slate-950 transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm w-full sm:w-auto"
+                      >
+                        <Printer className="w-4 h-4" />
+                        <span>Print Worksheet • طباعة ورقة العمل</span>
+                      </button>
+                    </div>
+
+                    {/* Post-submit Score Banner */}
+                    {worksheetSubmitted && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-amber-50 border-2 border-amber-200 p-5 rounded-[28px] text-center flex flex-col items-center gap-2.5 mt-2 z-10"
+                      >
+                        <span className="text-4xl">🎉🎓</span>
+                        <h4 className="text-xl font-black text-amber-950 uppercase tracking-tight">Worksheet Corrected! تم التصحيح</h4>
+                        <p className="text-xs font-bold text-slate-600">
+                          Dear <span className="font-black text-indigo-600">{studentName || "Pupil"}</span>, you scored <span className="text-lg font-black text-violet-600">{worksheetScore} / 20 Marks</span>!
+                        </p>
+                        <div className="text-[10px] bg-white text-emerald-700 font-extrabold px-4 py-1.5 rounded-full shadow-sm border border-emerald-100 uppercase tracking-wider">
+                          {worksheetScore === 20 ? "Perfect! أحسنت يا بطل! 🏆🌟" : "Good Try! راجع الأخطاء لتتعلم أكثر! 📚✨"}
+                        </div>
+                      </motion.div>
+                    )}
                   </div>
                 </motion.div>
               )}
